@@ -199,10 +199,14 @@ void MainContext::FF13_InitializeGameAddresses()
 	ff13_party_screen_scissor_scaling_factor_4 = baseAddr + 0x668E91;
 }
 
+void MainContext::ForceWindowActivate(const HWND hWnd) {
+	PostMessage(hWnd, WM_ACTIVATE, WA_INACTIVE, NULL);
+	PostMessage(hWnd, WM_ACTIVATE, WA_CLICKACTIVE, NULL);
+}
+
 void MainContext::FF13_OneTimeFixes() {
 
-	if (IsDXVK())
-		SetForegroundWindow(hWndFF13);
+	ForceWindowActivate(hWndFF13);
 
 	FF13_NOPIngameFrameRateLimitSetter();
 	FF13_RemoveContinuousControllerScan();
@@ -309,8 +313,7 @@ void MainContext::FF13_SetFrameRateVariables()
 
 void MainContext::FF13_2_OneTimeFixes()
 {
-	if (IsDXVK())
-		SetForegroundWindow(hWndFF13);
+	ForceWindowActivate(hWndFF13);
 
 	if (*ff13_2_frame_pacer_ptr_address) {
 		**ff13_2_frame_pacer_ptr_address = MAX_FRAME_RATE_LIMIT;

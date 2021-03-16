@@ -139,6 +139,7 @@ private:
 	void PrintVersionInfo();
 
 	void FF13_InitializeGameAddresses();
+	
 	void FF13_OneTimeFixes();
 	void FF13_EnableControllerVibration();
 	void FF13_NOPIngameFrameRateLimitSetter();
@@ -154,8 +155,8 @@ private:
 	void FF13_2_EnableControllerVibration();
 
 	void AdjustVertexData(const uint32_t width, const uint32_t height);
-
 	bool MatchesExpectedVertexStream(const float* pVertexStreamZeroData);
+	void ForceWindowActivate(const HWND hWnd);
 
 	bool OneTimeFixInit(std::unique_ptr<wchar_t[]>& className, HWND hWnd);
 	std::atomic_bool otf_init = false;
