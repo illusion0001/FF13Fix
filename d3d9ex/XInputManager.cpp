@@ -65,7 +65,6 @@ void XInputManager::SetControllerVibration(const WORD& leftMotorVibration, const
 	int32_t controllerToVibrate = controllerIdMainThread;
 
 	if (controllerToVibrate >= 0) {
-		LogValues();
 		XINPUT_VIBRATION vibration;
 		ZeroMemory(&vibration, sizeof(XINPUT_VIBRATION));
 		vibration.wLeftMotorSpeed = leftMotorVibration;
