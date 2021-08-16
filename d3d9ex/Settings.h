@@ -60,16 +60,19 @@ SETTING(bool, BoolValue, DisableIngameControllerHotSwapping, FFXIII, true,
 	L"# DisableIngameControllerHotSwapping\n"
 	L"#\n"
 	L"# By default FF13Fix disables the game's continuous controller scanning that causes stuttering (especially if you do not have any controller connected)\n"
-	L"# If you with you can enable it again (by setting the config to 'false', so you can re-connect your controller while playing.\n"
-	L"# Note that EnableControllerVibration is incompatible with the controller hotswapping, \n"
-	L"#  so it is automatically disabled if DisableIngameControllerHotSwapping is set to 'false'"
+	L"# Note that if you are using the FF13Fix XInput implementation, this setting is forced 'true', as hotswapping will work anyway even if the internal game scanning logic is disabled (FF13Fix will use its on hotswapping logic)"
 );
-SETTING(bool, BoolValue, EnableControllerVibration, FFXIII, true, 
+SETTING(bool, BoolValue, Enable, FFXIII_XInput, true,
+	L"# Replace the internal game controller input logic by FF13Fix XInput implementation\n"
+	L"#\n"
+	L"# Controller hotswapping/vibration works without impacting game performance."
+);
+SETTING(bool, BoolValue, EnableControllerVibration, FFXIII_XInput, true,
 	L"# EnableControllerVibration\n"
 	L"#\n"
-	L"# Enables controller vibration on the first connected XInput device."
+	L"# Enables controller vibration."
 );
-SETTING(bool, DoubleValue, VibrationStrengthFactor, FFXIII, 2.0, 
+SETTING(bool, DoubleValue, VibrationStrengthFactor, FFXIII_XInput, 1.0,
 	L"# VibrationStrengthFactor\n"
 	L"#\n"
 	L"# Higher numbers = stronger vibration"

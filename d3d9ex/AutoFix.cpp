@@ -25,6 +25,9 @@ void MainContext::EnableAutoFix()
 		spdlog::info("AutoFix for \"Final Fantasy XIII-2\" enabled");
 		FF13_2_InitializeGameAddresses();
 		FF13_2_CreateSetFrameRateCodeBlock();
+		FF13_2_CreateSetPressedButtonsCodeBlock();
+		FF13_2_CreateSetLeftAnalogCodeBlock();
+		FF13_2_CreateSetRightAnalogCodeBlock();
 	}
 }
 
@@ -154,6 +157,8 @@ HRESULT MainContext::SetScissorRect(IDirect3DDevice9* pIDirect3DDevice9, CONST R
 // hate this workaround but we cant directly mix d3d9 include with and without defined CINTERFACE
 namespace cinterface {
 	void VertexBufferFix(IDirect3DVertexBuffer9* pVertexBuffer);
+	void InitHookPresent(IDirect3DSwapChain9* pDirect3DSwapChain9);
+	void ShareValuesWithSwapChainHook(XInputManager* xInputManager, uint32_t* ff13ButtonPressed, float* ff13AnalogValues);
 }
 
 HRESULT MainContext::CreateVertexBuffer(IDirect3DDevice9* pIDirect3DDevice9, UINT Length, DWORD Usage, DWORD FVF, D3DPOOL Pool, IDirect3DVertexBuffer9** ppVertexBuffer, HANDLE* pSharedHandle)
@@ -172,12 +177,23 @@ HRESULT MainContext::CreateVertexBuffer(IDirect3DDevice9* pIDirect3DDevice9, UIN
 				//Pool = D3DPOOL_DEFAULT;
 				cinterface::VertexBufferFix(*ppVertexBuffer);
 			}
+
+
+			// TODO Move this somewhere else... 
+			// I've tried to move it to hkIDirect3D9::ApplyCreateDeviceFix but I got an incorrect ref count error message in the log (why?)
+			IDirect3DSwapChain9* swapChain = NULL;
+			HRESULT getSwapChainResult = pIDirect3DDevice9->GetSwapChain(0, &swapChain);
+			context.HookPresent(&swapChain);
 			return hr;
 		}
 	}
 
 	return pIDirect3DDevice9->CreateVertexBuffer(Length, Usage, FVF, Pool, ppVertexBuffer, pSharedHandle);
 }
+void MainContext::HookPresent(IDirect3DSwapChain9** swapChain){
+	cinterface::InitHookPresent(*swapChain);
+}
+
 HRESULT MainContext::DrawPrimitiveUP(IDirect3DDevice9* pIDirect3DDevice9, D3DPRIMITIVETYPE PrimitiveType, UINT PrimitiveCount, const void* pVertexStreamZeroData, UINT VertexStreamZeroStride)
 {
 	if (PrimitiveType == D3DPT_TRIANGLEFAN && PrimitiveCount == 2 && VertexStreamZeroStride == 20 && MatchesExpectedVertexStream((const float*)pVertexStreamZeroData)) {
@@ -248,8 +264,6 @@ void MainContext::FF13_InitializeGameAddresses()
 	ff13_continuous_scan_instruction_address = baseAddr + 0x420868;
 	ff13_enemy_scan_box_code_address = baseAddr + 0x54C920;
 	ff13_base_controller_input_address_ptr = (uint8_t**)(baseAddr + 0x02411220);
-	ff13_vibration_low_set_zero_address = baseAddr + 0x4210DF;
-	ff13_vibration_high_set_zero_address = baseAddr + 0x4210F3;
 	ff13_internal_res_w = (uint32_t*)(baseAddr + 0x22E5168);
 	ff13_internal_res_h = ff13_internal_res_w + 1;
 	ff13_loading_screen_scissor_scaling_factor_1 = baseAddr + 0x616596;
@@ -265,6 +279,9 @@ void MainContext::FF13_InitializeGameAddresses()
 	ff13_message_box_stack_push_address = baseAddr + 0xA8A982;
 	ff13_exe_large_address_aware_flag_address = baseAddr + 0x126;
 	ff13_exe_checksum_address = (uint32_t*)(baseAddr + 0x168);
+	ff13_or_pressed_buttons_instruction_address = baseAddr + 0x422C50;
+	ff13_set_eax_to_left_analog_pointer_instruction_address = baseAddr + 0x422BB2;
+	ff13_set_eax_to_right_analog_pointer_instruction_address = baseAddr + 0x422C0B;
 }
 
 void MainContext::FF13_HandleLargeAddressAwarePatch() {
@@ -315,11 +332,45 @@ void MainContext::FF13_OneTimeFixes() {
 	FF13_NOPIngameFrameRateLimitSetter();
 	FF13_RemoveContinuousControllerScan();
 	FF13_FixScissorRect();
-	FF13_EnableControllerVibration();
 	FF13_SetFrameRateVariables();
+	FF13_DisableInternalGamepadInput();
+	CheckAndEnableXInputImplementation(ff13_base_controller_input_address_ptr);
 	AdjustVertexData(*ff13_internal_res_w, *ff13_internal_res_h);
 
 	spdlog::info("Finished FF13 One Time Fixes");
+}
+
+void MainContext::FF13_DisableInternalGamepadInput()
+{
+
+	// Use our variable with the pressed buttons instead of the one update by the game
+	//
+	// instructions:
+	// or ecx,[ff13ButtonsPressed]
+	// nop
+	uint8_t newButtonsInstructions[7];
+	newButtonsInstructions[0] = 0x0B;
+	newButtonsInstructions[1] = 0x0D;
+	*(uint32_t**)(newButtonsInstructions + 2) = &ff13ButtonsPressed;
+	newButtonsInstructions[6] = 0x90;
+	MemPatch::Patch(ff13_or_pressed_buttons_instruction_address, newButtonsInstructions, 7);
+
+
+	uint8_t newLeftAnalogInstructions[7];
+	newLeftAnalogInstructions[0] = 0xB8;
+	*(float**)(newLeftAnalogInstructions + 1) = ff13AnalogValues;
+	newLeftAnalogInstructions[5] = 0x90;
+	newLeftAnalogInstructions[6] = 0x90;
+	MemPatch::Patch(ff13_set_eax_to_left_analog_pointer_instruction_address, newLeftAnalogInstructions, 7);
+
+
+	uint8_t newRightAnalogInstructions[7];
+	newRightAnalogInstructions[0] = 0xB8;
+	*(float**)(newRightAnalogInstructions + 1) = (ff13AnalogValues + 4);
+	newRightAnalogInstructions[5] = 0x90;
+	newRightAnalogInstructions[6] = 0x90;
+	MemPatch::Patch(ff13_set_eax_to_right_analog_pointer_instruction_address, newRightAnalogInstructions, 7);
+
 }
 
 void MainContext::FF13_PatchMessageBox()
@@ -333,26 +384,10 @@ void MainContext::FF13_PatchMessageBox()
 	PatchMessageBoxCall(ff13_message_box_call_address);
 }
 
-void MainContext::FF13_EnableControllerVibration()
-{
-	if (!config.GetFFXIIIEnableControllerVibration()) {
-		spdlog::info("Vibration should not be enabled (config file)");
-		return;
-	}
-	if (!config.GetFFXIIIDisableIngameControllerHotSwapping()) {
-		spdlog::info("Vibration disabled because FFXIIIDisableIngameControllerHotSwapping is set to false (config file)");
-		return;
-	}
-	spdlog::info("Enabling controller vibration...");
-	MemPatch::Nop(ff13_vibration_low_set_zero_address, 5);
-	MemPatch::Nop(ff13_vibration_high_set_zero_address, 5);
-
-	xinputManager = new XInputManager(ff13_base_controller_input_address_ptr, config.GetFFXIIIVibrationStrengthFactor());
-}
 
 void MainContext::FF13_RemoveContinuousControllerScan()
 {
-	if (!config.GetFFXIIIDisableIngameControllerHotSwapping()) {
+	if (!config.GetFFXIIIDisableIngameControllerHotSwapping() && !config.GetFFXIII_XInputEnable()) {
 		spdlog::info("Continuous controller scanning not disabled (config)");
 		return;
 	}
@@ -418,7 +453,8 @@ void MainContext::FF13_SetFrameRateVariables()
 
 			float* ingameFrameRateLimitPtr = framePacerTargetPtr + 1;
 			*ingameFrameRateLimitPtr = frameRateLimit;
-			spdlog::info("Target frame rate set to {}", frameRateLimit);		}
+			spdlog::info("Target frame rate set to {}", frameRateLimit);		
+		}
 	}
 	else {
 		spdlog::info("Unable to find frame pacer / frame rate address. This shouldn't happen! Report this.");
@@ -437,13 +473,45 @@ void MainContext::FF13_2_OneTimeFixes()
 		spdlog::info("Frame pacer disabled");
 
 		FF13_2_AddHookIngameFrameRateLimitSetter();
+		FF13_2_AddHookPressedButtons();
+		FF13_2_AddSetLeftAnalogHook();
+		FF13_2_AddSetRightAnalogHook();
 		FF13_2_RemoveContinuousControllerScan();
-		FF13_2_EnableControllerVibration();
+		CheckAndEnableXInputImplementation(ff13_2_base_controller_input_address_ptr);
 		AdjustVertexData(*ff13_2_internal_res_w, *ff13_2_internal_res_h);
 		spdlog::info("Finished FF13-2 One Time Fixes");
 	}
 	else {
 		spdlog::info("Unable to apply FF13-2 One Time Fixes. Report this!");
+	}
+}
+
+void MainContext::FF13_2_AddHookPressedButtons()
+{
+	AddJumpHook(ff13_2_pressed_buttons_instruction_jump_injected_address, FF13_2_SET_PRESSED_BUTTONS_INJECTED_CODE, 3);
+}
+
+void MainContext::FF13_2_AddSetLeftAnalogHook()
+{
+	AddJumpHook(ff13_2_left_analog_instruction_jump_injected_address, FF13_2_SET_LEFT_ANALOG_INJECTED_CODE, 5);
+}
+
+void MainContext::FF13_2_AddSetRightAnalogHook()
+{
+	AddJumpHook(ff13_2_right_analog_instruction_jump_injected_address, FF13_2_SET_RIGHT_ANALOG_INJECTED_CODE, 5);
+}
+
+void MainContext::AddJumpHook(uint8_t* addrToAddJump, const uint8_t* codeBlockAddr, const int& numberOfNops)
+{
+	const int jumpInstructionSize = 5;
+	MemPatch::CUnprotect unp(addrToAddJump, jumpInstructionSize + numberOfNops);
+	// jmp codeBlockAddr
+	addrToAddJump[0] = 0xE9;
+	*((uint32_t*)(addrToAddJump + 1)) = codeBlockAddr - addrToAddJump - jumpInstructionSize;
+	
+	for (int i = 5; i < 5 + numberOfNops; i++) {
+		// nop
+		addrToAddJump[i] = 0x90;
 	}
 }
 
@@ -471,18 +539,17 @@ void MainContext::PatchMessageBoxCall(uint8_t* callInstructionAddress)
 	MemPatch::Patch(callInstructionAddress, patch, patchSize);
 }
 
-void MainContext::FF13_2_EnableControllerVibration()
+void MainContext::CheckAndEnableXInputImplementation(uint8_t** inputAddress)
 {
-	if (!config.GetFFXIIIEnableControllerVibration()) {
-		spdlog::info("Vibration should not be enabled (config file)");
+	if (!config.GetFFXIII_XInputEnable()) {
+		spdlog::info("XInput implementation should not be enabled (config file)");
 		return;
 	}
-	spdlog::info("Enabling controller vibration...");
+	spdlog::info("Enabling XInput implementation...");
 
-	MemPatch::Nop(ff13_2_vibration_low_set_zero_address, 5);
-	MemPatch::Nop(ff13_2_vibration_high_set_zero_address, 5);
-
-	xinputManager = new XInputManager(ff13_2_base_controller_input_address_ptr, config.GetFFXIIIVibrationStrengthFactor());
+	const float vibrationStrength = config.GetFFXIII_XInputEnableControllerVibration() ? config.GetFFXIII_XInputVibrationStrengthFactor() : -1.0f;
+	xinputManager = new XInputManager(inputAddress, vibrationStrength);
+	cinterface::ShareValuesWithSwapChainHook(xinputManager, &ff13ButtonsPressed, ff13AnalogValues);
 }
 
 void MainContext::AdjustVertexData(const uint32_t width, const uint32_t height)
@@ -506,17 +573,18 @@ void MainContext::FF13_2_InitializeGameAddresses()
 	ff13_2_set_frame_rate_address = baseAddr + 0x802616;
 	ff13_2_frame_pacer_ptr_address = (float**)(baseAddr + 0x4D67208);
 	ff13_2_base_controller_input_address_ptr = (uint8_t**)(baseAddr + 0x212A164);
-	ff13_2_vibration_low_set_zero_address = baseAddr + 0x2A7221;
-	ff13_2_vibration_high_set_zero_address = baseAddr + 0x2A7226;
 	ff13_2_internal_res_w = (uint32_t*)(baseAddr + 0x1FA864C);
 	ff13_2_internal_res_h = ff13_2_internal_res_w + 1;
 	ff13_2_message_box_call_address = baseAddr + 0x8047C0;
 	ff13_2_message_box_stack_push_address = baseAddr + 0x8047B4;
+	ff13_2_pressed_buttons_instruction_jump_injected_address = baseAddr + 0x2A79AB;
+	ff13_2_left_analog_instruction_jump_injected_address = baseAddr + 0x2A793F;
+	ff13_2_right_analog_instruction_jump_injected_address = baseAddr + 0x2A7964;
 }
 
 void MainContext::FF13_2_RemoveContinuousControllerScan()
 {
-	if (!config.GetFFXIIIDisableIngameControllerHotSwapping()) {
+	if (!config.GetFFXIIIDisableIngameControllerHotSwapping() && !config.GetFFXIII_XInputEnable()) {
 		spdlog::info("Continuous controller scanning not disabled (config)");
 		return;
 	}
@@ -536,12 +604,106 @@ void MainContext::FF13_2_AddHookIngameFrameRateLimitSetter()
 
 	spdlog::info("Hooking the instruction that sets the frame rate...");
 
-	MemPatch::CUnprotect unp(ff13_2_set_frame_rate_address, 5);
-
-	// patching to: jmp FF13_2_SET_FRAME_RATE_INJECTED_CODE
-	*ff13_2_set_frame_rate_address = 0xE9;
-	*((uint32_t*)(ff13_2_set_frame_rate_address + 1)) = FF13_2_SET_FRAME_RATE_INJECTED_CODE - ff13_2_set_frame_rate_address - 5;
+	AddJumpHook(ff13_2_set_frame_rate_address, FF13_2_SET_FRAME_RATE_INJECTED_CODE, 0);
 }
+
+void MainContext::FF13_2_CreateSetPressedButtonsCodeBlock()
+{
+	const int blockSize = 15;
+	FF13_2_SET_PRESSED_BUTTONS_INJECTED_CODE = new(std::nothrow) uint8_t[blockSize];
+	spdlog::debug("FF13_2_SET_PRESSED_BUTTONS_INJECTED_CODE = {}", (void*)FF13_2_SET_PRESSED_BUTTONS_INJECTED_CODE);
+	if (!FF13_2_SET_PRESSED_BUTTONS_INJECTED_CODE) {
+		spdlog::info("Failed to initialize FFXIII-2 pressed buttons code block");
+		return;
+	}
+	DWORD oldProtect;
+	VirtualProtect(FF13_2_SET_PRESSED_BUTTONS_INJECTED_CODE, blockSize, PAGE_EXECUTE_READWRITE, &oldProtect);
+
+	//mov eax, [esp + 3C]
+	FF13_2_SET_PRESSED_BUTTONS_INJECTED_CODE[0] = 0x8B;
+	FF13_2_SET_PRESSED_BUTTONS_INJECTED_CODE[1] = 0x44;
+	FF13_2_SET_PRESSED_BUTTONS_INJECTED_CODE[2] = 0x24;
+	FF13_2_SET_PRESSED_BUTTONS_INJECTED_CODE[3] = 0x3C;
+
+	//mov edx,[&ff13ButtonsPressed]
+	FF13_2_SET_PRESSED_BUTTONS_INJECTED_CODE[4] = 0x8B;
+	FF13_2_SET_PRESSED_BUTTONS_INJECTED_CODE[5] = 0x15;
+	*((uint32_t**) (FF13_2_SET_PRESSED_BUTTONS_INJECTED_CODE + 6)) = &ff13ButtonsPressed;
+	
+	//jmp ffxiii2img.exe + 2A79B3
+	FF13_2_SET_PRESSED_BUTTONS_INJECTED_CODE[10] = 0xE9;
+	*(uint32_t*)(FF13_2_SET_PRESSED_BUTTONS_INJECTED_CODE + 11) = ff13_2_pressed_buttons_instruction_jump_injected_address - FF13_2_SET_PRESSED_BUTTONS_INJECTED_CODE - 10;
+}
+
+void MainContext::FF13_2_CreateSetRightAnalogCodeBlock() {
+	const int blockSize = 20;
+	FF13_2_SET_RIGHT_ANALOG_INJECTED_CODE = new(std::nothrow) uint8_t[blockSize];
+	spdlog::debug("FF13_2_SET_RIGHT_ANALOG_INJECTED_CODE = {}", (void*)FF13_2_SET_RIGHT_ANALOG_INJECTED_CODE);
+	if (!FF13_2_SET_RIGHT_ANALOG_INJECTED_CODE) {
+		spdlog::info("Failed to initialize FFXIII-2 set right analog code block");
+		return;
+	}
+	DWORD oldProtect;
+	VirtualProtect(FF13_2_SET_PRESSED_BUTTONS_INJECTED_CODE, blockSize, PAGE_EXECUTE_READWRITE, &oldProtect);
+
+	//mov eax,ff13AnalogValues+4
+	FF13_2_SET_RIGHT_ANALOG_INJECTED_CODE[0] = 0xB8;
+	*(float **)(FF13_2_SET_RIGHT_ANALOG_INJECTED_CODE + 1) = ff13AnalogValues + 4;
+
+	//movq xmm0, [eax]
+	FF13_2_SET_RIGHT_ANALOG_INJECTED_CODE[5] = 0xF3;
+	FF13_2_SET_RIGHT_ANALOG_INJECTED_CODE[6] = 0x0F;
+	FF13_2_SET_RIGHT_ANALOG_INJECTED_CODE[7] = 0x7E;
+	FF13_2_SET_RIGHT_ANALOG_INJECTED_CODE[8] = 0x00;
+
+	// movq[esp + 2C], xmm0
+	FF13_2_SET_RIGHT_ANALOG_INJECTED_CODE[9] = 0x66;
+	FF13_2_SET_RIGHT_ANALOG_INJECTED_CODE[10] = 0x0F;
+	FF13_2_SET_RIGHT_ANALOG_INJECTED_CODE[11] = 0xD6;
+	FF13_2_SET_RIGHT_ANALOG_INJECTED_CODE[12] = 0x44;
+	FF13_2_SET_RIGHT_ANALOG_INJECTED_CODE[13] = 0x24;
+	FF13_2_SET_RIGHT_ANALOG_INJECTED_CODE[14] = 0x2C;
+
+	// jmp ff13_2_right_analog_instruction_jump_injected_address
+	FF13_2_SET_RIGHT_ANALOG_INJECTED_CODE[15] = 0xE9;
+	*(uint32_t*)(FF13_2_SET_RIGHT_ANALOG_INJECTED_CODE + 16) = ff13_2_right_analog_instruction_jump_injected_address - FF13_2_SET_RIGHT_ANALOG_INJECTED_CODE - 15;
+}
+
+void MainContext::FF13_2_CreateSetLeftAnalogCodeBlock() {
+	const int blockSize = 20;
+	FF13_2_SET_LEFT_ANALOG_INJECTED_CODE = new(std::nothrow) uint8_t[blockSize];
+	spdlog::debug("FF13_2_SET_LEFT_ANALOG_INJECTED_CODE = {}", (void*)FF13_2_SET_LEFT_ANALOG_INJECTED_CODE);
+	if (!FF13_2_SET_LEFT_ANALOG_INJECTED_CODE) {
+		spdlog::info("Failed to initialize FFXIII-2 set left analog code block");
+		return;
+	}
+	DWORD oldProtect;
+	VirtualProtect(FF13_2_SET_LEFT_ANALOG_INJECTED_CODE, blockSize, PAGE_EXECUTE_READWRITE, &oldProtect);
+
+	//mov eax,ff13AnalogValues
+	FF13_2_SET_LEFT_ANALOG_INJECTED_CODE[0] = 0xB8;
+	*(float**)(FF13_2_SET_LEFT_ANALOG_INJECTED_CODE + 1) = ff13AnalogValues;
+
+	//movq xmm0, [eax]
+	FF13_2_SET_LEFT_ANALOG_INJECTED_CODE[5] = 0xF3;
+	FF13_2_SET_LEFT_ANALOG_INJECTED_CODE[6] = 0x0F;
+	FF13_2_SET_LEFT_ANALOG_INJECTED_CODE[7] = 0x7E;
+	FF13_2_SET_LEFT_ANALOG_INJECTED_CODE[8] = 0x00;
+
+	// movq[esp + 2C], xmm0
+	FF13_2_SET_LEFT_ANALOG_INJECTED_CODE[9] = 0x66;
+	FF13_2_SET_LEFT_ANALOG_INJECTED_CODE[10] = 0x0F;
+	FF13_2_SET_LEFT_ANALOG_INJECTED_CODE[11] = 0xD6;
+	FF13_2_SET_LEFT_ANALOG_INJECTED_CODE[12] = 0x44;
+	FF13_2_SET_LEFT_ANALOG_INJECTED_CODE[13] = 0x24;
+	FF13_2_SET_LEFT_ANALOG_INJECTED_CODE[14] = 0x34;
+
+	// jmp ff13_2_left_analog_instruction_jump_injected_address
+	FF13_2_SET_LEFT_ANALOG_INJECTED_CODE[15] = 0xE9;
+	*(uint32_t*)(FF13_2_SET_LEFT_ANALOG_INJECTED_CODE + 16) = ff13_2_left_analog_instruction_jump_injected_address - FF13_2_SET_LEFT_ANALOG_INJECTED_CODE - 15;
+}
+
+
 
 void MainContext::FF13_2_CreateSetFrameRateCodeBlock()
 {
@@ -584,7 +746,7 @@ void MainContext::FF13_2_CreateSetFrameRateCodeBlock()
 	*(FF13_2_SET_FRAME_RATE_INJECTED_CODE + 11) = 0x76;
 	*(FF13_2_SET_FRAME_RATE_INJECTED_CODE + 12) = 0x08;
 
-	// movss xmm0,[&FF13_2_30_FPS]
+	// movss xmm0,[&ff13_2_targetFrameRate]
 	*(FF13_2_SET_FRAME_RATE_INJECTED_CODE + 13) = 0xF3;
 	*(FF13_2_SET_FRAME_RATE_INJECTED_CODE + 14) = 0x0F;
 	*(FF13_2_SET_FRAME_RATE_INJECTED_CODE + 15) = 0x10;

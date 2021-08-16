@@ -12,7 +12,7 @@
 #include "XInputManager.h"
 
 static const char* inifilename = "FF13Fix.ini";
-#define CONFIG_VERSION 7
+#define CONFIG_VERSION 8
 
 class Config
 {
@@ -57,6 +57,7 @@ public:
 	void ApplyBehaviorFlagsFix(DWORD* flags);
 	HRESULT SetScissorRect(IDirect3DDevice9* pIDirect3DDevice9, CONST RECT* rect);
 	HRESULT CreateVertexBuffer(IDirect3DDevice9* pIDirect3DDevice9, UINT Length, DWORD Usage, DWORD FVF, D3DPOOL Pool, IDirect3DVertexBuffer9** ppVertexBuffer, HANDLE* pSharedHandle);
+	void HookPresent(IDirect3DSwapChain9** swapChain);
 	HRESULT DrawPrimitiveUP(IDirect3DDevice9* pIDirect3DDevice9, D3DPRIMITIVETYPE PrimitiveType, UINT PrimitiveCount, CONST void* pVertexStreamZeroData, UINT VertexStreamZeroStride);
 	bool BehaviorFlagsToString(DWORD BehaviorFlags, std::string* BehaviorFlagsString);
 
@@ -69,7 +70,6 @@ public:
 
 	void OneTimeFix();
 	bool IsDXVK();
-
 private:
 	enum class AutoFixes : u32
 	{
@@ -94,8 +94,6 @@ private:
 	uint8_t* ff13_continuous_scan_instruction_address = NULL;
 	uint8_t* ff13_enemy_scan_box_code_address = NULL;
 	uint8_t** ff13_base_controller_input_address_ptr = NULL;
-	uint8_t* ff13_vibration_high_set_zero_address = NULL;
-	uint8_t* ff13_vibration_low_set_zero_address = NULL;
 	uint8_t* ff13_loading_screen_scissor_scaling_factor_1 = NULL;
 	uint8_t* ff13_loading_screen_scissor_scaling_factor_2 = NULL;
 	uint8_t* ff13_loading_screen_scissor_scaling_factor_3 = NULL;
@@ -109,17 +107,24 @@ private:
 	uint8_t* ff13_message_box_call_address = NULL;
 	uint8_t* ff13_exe_large_address_aware_flag_address = NULL;
 	uint32_t* ff13_exe_checksum_address = NULL;
+	uint8_t* ff13_or_pressed_buttons_instruction_address = NULL;
+	uint8_t* ff13_set_eax_to_left_analog_pointer_instruction_address = NULL;
+	uint8_t* ff13_set_eax_to_right_analog_pointer_instruction_address = NULL;
 	uint32_t* ff13_internal_res_w;
 	uint32_t* ff13_internal_res_h;
 
 	uint8_t* FF13_2_SET_FRAME_RATE_INJECTED_CODE = NULL;
+	uint8_t* FF13_2_SET_PRESSED_BUTTONS_INJECTED_CODE = NULL;
+	uint8_t* FF13_2_SET_LEFT_ANALOG_INJECTED_CODE = NULL;
+	uint8_t* FF13_2_SET_RIGHT_ANALOG_INJECTED_CODE = NULL;
 	uint8_t* ff13_2_continuous_scan_instruction_address;
 	uint8_t* ff13_2_set_frame_rate_address;
+	uint8_t* ff13_2_pressed_buttons_instruction_jump_injected_address = NULL;
+	uint8_t* ff13_2_right_analog_instruction_jump_injected_address = NULL;
+	uint8_t* ff13_2_left_analog_instruction_jump_injected_address = NULL;
 	float** ff13_2_frame_pacer_ptr_address;
 	float ff13_2_targetFrameRate;
 	uint8_t** ff13_2_base_controller_input_address_ptr = NULL;
-	uint8_t* ff13_2_vibration_high_set_zero_address = NULL;
-	uint8_t* ff13_2_vibration_low_set_zero_address = NULL;
 	uint8_t* ff13_2_message_box_stack_push_address = NULL;
 	uint8_t* ff13_2_message_box_call_address = NULL;
 	uint32_t* ff13_2_internal_res_w;
@@ -139,6 +144,10 @@ private:
 	  -1.00f,      -1.00f,    0.0f,    0.0f,    1.0f
 	};
 
+	
+	uint32_t ff13ButtonsPressed = 0;
+	float ff13AnalogValues[8] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+
 	const float FF13_2_30_FPS = 30.0F;
 	const float FF13_2_MAX_FRAME_CAP = 1000.0F;
 
@@ -157,7 +166,6 @@ private:
 	void PrintVersionInfo();
 
 	void FF13_InitializeGameAddresses();
-	
 	void FF13_OneTimeFixes();
 	void FF13_PatchMessageBox();
 	void FF13_EnableControllerVibration();
@@ -166,14 +174,24 @@ private:
 	void FF13_FixScissorRect();
 	void FF13_RemoveContinuousControllerScan();
 	void FF13_HandleLargeAddressAwarePatch();
+	void FF13_DisableInternalGamepadInput();
 
 	void FF13_2_CreateSetFrameRateCodeBlock();
 	void FF13_2_InitializeGameAddresses();
 	void FF13_2_RemoveContinuousControllerScan();
 	void FF13_2_AddHookIngameFrameRateLimitSetter();
+	void FF13_2_CreateSetPressedButtonsCodeBlock();
+	void FF13_2_CreateSetRightAnalogCodeBlock();
+	void FF13_2_CreateSetLeftAnalogCodeBlock();
+	void FF13_2_AddHookPressedButtons();
+	void FF13_2_AddSetLeftAnalogHook();
+	void FF13_2_AddSetRightAnalogHook();
+	void AddJumpHook(uint8_t* addrToAddJump, const uint8_t* codeBlockAddr, const int& numberOfNops);
 	void FF13_2_OneTimeFixes();
 	void FF13_2_PatchMessageBox();
-	void FF13_2_EnableControllerVibration();
+	void FF13_2_EnableXInputImplementation();
+
+	void CheckAndEnableXInputImplementation(uint8_t** inputAddress);
 
 	void AdjustVertexData(const uint32_t width, const uint32_t height);
 	bool MatchesExpectedVertexStream(const float* pVertexStreamZeroData);

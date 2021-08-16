@@ -68,6 +68,9 @@
     <ClCompile Include="VertexFix.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="IDirect3DSwapChain9Hook.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="exports.def">
