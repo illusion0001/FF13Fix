@@ -108,6 +108,11 @@ void XInputManager::ReadValues(uint32_t* buttonBuffer, float* ff13AnalogValues) 
 		ff13AnalogValues[5] = rightAnalogY;
 	}
 	else if (getStateStatus == ERROR_DEVICE_NOT_CONNECTED) {
+		*buttonBuffer = 0;
+		ff13AnalogValues[0] = 0.0f;
+		ff13AnalogValues[1] = 0.0f;
+		ff13AnalogValues[4] = 0.0f;
+		ff13AnalogValues[5] = 0.0f;
 		controllerIdMainThread = -1;
 		controllerIdShared.store(-1, std::memory_order_release);
 		controllerIdShared.notify_all();
