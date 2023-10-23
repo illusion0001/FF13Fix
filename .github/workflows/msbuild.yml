@@ -27,7 +27,6 @@ jobs:
           submodules: recursive
           fetch-depth: 0
       - name: Setup environment variables
-        if: false
         run: |
           $cmdOutput = Split-Path -Path $pwd -Leaf
           $_ver = "1.0.$(git rev-list HEAD --count)-$(git rev-parse --short=8 HEAD)"
@@ -77,19 +76,17 @@ jobs:
           # Remove downloaded dinput8.dll
           Remove-Item "dinput8.dll"
       - name: Upload Artifact
-        if: false
         uses: actions/upload-artifact@v3
         with:
           name: ${{ env.zip_name }}
           path: |
-            ${{ env.BUILD_CONFIGURATION }}/dist/*
+            ${{ env.BUILD_CONFIGURATION }}/*.dll
           if-no-files-found: error
       - name: Upload Artifact (pdb)
-        if: false
         uses: actions/upload-artifact@v3
         with:
           name: ${{ env.zip_name }}-pdb
           path: |
-            ${{ env.BUILD_CONFIGURATION }}/dist/**/*.asi
+            ${{ env.BUILD_CONFIGURATION }}/*.dll
             ${{ env.BUILD_CONFIGURATION }}/*.pdb
           if-no-files-found: error
