@@ -42,8 +42,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: ${{ env.zip_name }}
-          path: |
-            ${{ env.BUILD_CONFIGURATION }}/*.dll
+          path: ${{ env.BUILD_CONFIGURATION }}/*.dll
           if-no-files-found: error
       - name: Upload Artifact (pdb)
         uses: actions/upload-artifact@v3
