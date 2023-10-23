@@ -1,0 +1,56 @@
+name: MSBuild
+
+on:
+  push:
+    paths-ignore:
+      - '**/*.md'
+      - '**/*.txt'
+  pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - '**/*.txt'
+  workflow_dispatch:
+
+env:
+  BUILD_CONFIGURATION: Release
+  BUILD_PLATFORM: Win32
+  SOLUTION_PATH: d3d9ex.sln
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout main repository
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+          fetch-depth: 0
+      - name: Setup environment variables
+        run: |
+          $cmdOutput = Split-Path -Path $pwd -Leaf
+          $_ver = "1.0.$(git rev-list HEAD --count)-$(git rev-parse --short=8 HEAD)"
+          echo "commit_ver=$_ver" >> "$Env:GITHUB_ENV"
+          echo "zip_name=$cmdOutput-$_ver" >> "$Env:GITHUB_ENV"
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@main
+      - name: Build
+        run: msbuild /m /p:Configuration=${{ env.BUILD_CONFIGURATION }} /p:Platform=${{ env.BUILD_PLATFORM }} ${{ env.SOLUTION_PATH }}
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.zip_name }}
+          path: ${{ env.BUILD_CONFIGURATION }}/*.dll
+          if-no-files-found: error
+      - name: Upload Artifact (pdb)
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.zip_name }}-pdb
+          path: |
+            ${{ env.BUILD_CONFIGURATION }}/*.dll
+            ${{ env.BUILD_CONFIGURATION }}/*.pdb
+          if-no-files-found: error
+
+        
