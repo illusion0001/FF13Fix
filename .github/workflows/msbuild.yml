@@ -1,0 +1,98 @@
+name: MSBuild
+
+on:
+  push:
+    paths-ignore:
+      - '**/*.md'
+      - '**/*.txt'
+  pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - '**/*.txt'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+env:
+  BUILD_CONFIGURATION: Release
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout main repository
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+          fetch-depth: 0
+      - name: Setup environment variables
+        run: |
+          $cmdOutput = Split-Path -Path $pwd -Leaf
+          $_ver = "1.0.$(git rev-list HEAD --count)-$(git rev-parse --short=8 HEAD)"
+          echo "commit_ver=$_ver" >> "$Env:GITHUB_ENV"
+          echo "zip_name=$cmdOutput-$_ver" >> "$Env:GITHUB_ENV"
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@main
+      - name: Build
+        run: msbuild /m /p:Configuration=${{ env.BUILD_CONFIGURATION }} /p:Platform=x64 Windows-Game-Patches.sln
+      - name: Add ASI Loader to archive
+        if: false
+        working-directory: ${{ env.BUILD_CONFIGURATION }}
+        run: |
+          $hook_alias="Ultimate-ASI-Loader_x64.zip"
+          curl -fLO "https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/latest/download/$hook_alias"
+          Expand-Archive -Path "$hook_alias" -DestinationPath "."
+          $rootPath = "."
+          $asiFiles = Get-ChildItem "$rootPath" -Filter "*.asi" -File
+          foreach ($file in $asiFiles) {
+            $folderName = Join-Path $rootPath ($file.BaseName)
+            if (-not (Test-Path "dist\$folderName")) {
+              mkdir "dist\$folderName"
+            }
+            $destFile = Join-Path "dist\$folderName" $file.Name
+            Move-Item $file.FullName "$destFile" -Force
+
+            # Copy additional files
+            $otherFiles = Get-ChildItem "$rootPath" -Filter ($file.BaseName + "_*.*") -File
+            foreach ($otherFile in $otherFiles) {
+              # Strip game name
+              $destOtherFile = Join-Path "dist\$folderName" $otherFile.Name.Replace(($file.BaseName + "_"), "")
+              if ($otherFile.Extension -ne ".dll") {
+                # Move the additional file
+                Move-Item $otherFile.FullName "$destOtherFile" -Force
+              } else {
+                # Copy and rename dinput8 and remove the dummy file
+                Copy-Item "dinput8.dll" "$destOtherFile" -Force
+                Remove-Item $otherFile.FullName
+              }
+            }
+
+            $hash = Get-FileHash -Path "$destFile" -Algorithm SHA512 | Format-List
+            $hash | Out-File -Append -FilePath "dist\hashes.txt"
+          #  Add-Content -Path $hashFilePath -Value $hashString
+          }
+
+          # Remove downloaded dinput8.dll
+          Remove-Item "dinput8.dll"
+      - name: Upload Artifact
+        if: false
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.zip_name }}
+          path: |
+            ${{ env.BUILD_CONFIGURATION }}/dist/*
+          if-no-files-found: error
+      - name: Upload Artifact (pdb)
+        if: false
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.zip_name }}-pdb
+          path: |
+            ${{ env.BUILD_CONFIGURATION }}/dist/**/*.asi
+            ${{ env.BUILD_CONFIGURATION }}/*.pdb
+          if-no-files-found: error
