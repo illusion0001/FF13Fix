@@ -16,9 +16,6 @@ env:
   BUILD_PLATFORM: Win32
   SOLUTION_PATH: d3d9ex.sln
 
-permissions:
-  contents: write
-
 jobs:
   build:
     runs-on: windows-latest
